@@ -101,6 +101,8 @@ private:
      */
     float GetTransverseProfileFigureOfMerit(pandora::CaloHitList mergedClusterCaloHitList3D);
 
+    float GetOneShowerTransverseProfileFigureOfMerit(pandora::CaloHitList mergedClusterCaloHitList3D);
+
     float GetTransverseDepthRatioFigureOfMerit(pandora::CaloHitList mergedClusterCaloHitList3D);
 
     float GetLongitudinalProfileFigureOfMerit(pandora::CaloHitList mergedClusterCaloHitList3D);

@@ -139,6 +139,7 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
 	    int NClustersAfter = minimumFigureOfMeritClusterList.size();
 	    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "NClustersAfter", NClustersAfter));
 
+	    //TODO: WHY REBUILD PFO DOES NOT WORK
            if(minimumFigureOfMeritClusterList==clusterList3D)
            {
                std::cout << "NO CHANGE! Keep the original pfo" << std::endl;
@@ -157,7 +158,11 @@ StatusCode ThreeDReclusteringAlgorithm::Run()
 
                const PfoList *pDebugNewPfos(nullptr);
                PandoraContentApi::GetList(*this, m_newPfosListNameAllAfterReclustering, pDebugNewPfos);
-		
+
+               //PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::AddToPfo(*this, pShowerPfo, clusterList3D.front()));
+               //PANDORA_RETURN_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::EndReclustering(*this, originalClustersListName));
+               //unchangedPfoList.push_back(pShowerPfo);
+	        
 	       int IsRecluster = 1;
 	       PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "IsRecluster", IsRecluster));
                
@@ -435,8 +440,8 @@ StatusCode ThreeDReclusteringAlgorithm::FindBestThreeDClusters(ClusterList clust
     float minimumFigureOfMerit(initialFigureOfMerit);
     std::cout << "Before Transverse FoM = " << initialFigureOfMerit << std::endl;
 
-    //float RatioFoM = GetTransverseDepthRatioFigureOfMerit(caloHitList3D);
-    //std::cout << "Before Depth Ratio FoM = " << RatioFoM << std::endl;
+    float OneShwFoM = GetOneShowerTransverseProfileFigureOfMerit(caloHitList3D);
+    std::cout << "Before One Shw FoM = " << OneShwFoM << std::endl;
 
     float longFoM = GetLongitudinalProfileFigureOfMerit(caloHitList3D);
     std::cout << "Before Longitudinal FoM = " << longFoM << std::endl;
@@ -444,7 +449,8 @@ StatusCode ThreeDReclusteringAlgorithm::FindBestThreeDClusters(ClusterList clust
     float purity = GetCheatedFigureOfMerit(caloHitList3D);
     std::cout << "Before Purity = " << purity << std::endl;
 
-    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "beforeTransverseFoM", minimumFigureOfMerit));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "beforeTwoShwTransverseFoM", minimumFigureOfMerit));
+    PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "beforeOneShwTransverseFoM", OneShwFoM));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "beforeLongFoM", longFoM));
     PANDORA_MONITORING_API(SetTreeVariable(this->GetPandora(), m_treeName.c_str(), "beforePurity", purity));
 
@@ -659,11 +665,7 @@ float ThreeDReclusteringAlgorithm::GetCheatedFigureOfMerit(CaloHitList mergedClu
                     return x.second < y.second;
                 });
   
-    std::cout << "Cluster size = " << mergedClusterCaloHitList3D.size() << std::endl;
-
     float mainMcParticleFraction = (float)maxSharedHits->second/mergedClusterCaloHitList3D.size();
-    
-    std::cout << "Main McParticle Fraction = " << mainMcParticleFraction << std::endl;
 
     return (mainMcParticleFraction);
     //return (1-mainMcParticleFraction);
@@ -875,7 +877,7 @@ float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList
    
     //Estimate total cluster energy
     float clusterEnergyInMeV(0);
-    //for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D) clusterEnergyInMeV += pCaloHit3D->GetInputEnergy()*convertADCToMeV;
+    for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D) clusterEnergyInMeV += pCaloHit3D->GetInputEnergy()*convertADCToMeV;
 
     //Observed transverse profile
     int transverseProfileNBins = 50;
@@ -996,6 +998,115 @@ float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList
     return figureOfMerit;
 }
 
+float ThreeDReclusteringAlgorithm::GetOneShowerTransverseProfileFigureOfMerit(CaloHitList mergedClusterCaloHitList3D)
+{
+    std::cout << ">>>> I'm getting One Shower Transverse Profile FOM BEFORE RECLUSTERING" << std::endl;
+
+    // Begin with a PCA
+    CartesianVector centroid(0.f, 0.f, 0.f);
+    LArPcaHelper::EigenVectors eigenVecs;
+    LArPcaHelper::EigenValues eigenValues(0.f, 0.f, 0.f);
+    LArPcaHelper::RunPca(mergedClusterCaloHitList3D, centroid, eigenValues, eigenVecs);
+
+    // By convention, the primary axis has a positive z-component.
+    const CartesianVector axisDirection(eigenVecs.at(0).GetZ() > 0.f ? eigenVecs.at(0) : eigenVecs.at(0) * -1.f);
+ 
+    // Place intercept at hit with minimum projection
+    float minProjection(std::numeric_limits<float>::max());
+    for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D)
+        minProjection = std::min(minProjection, axisDirection.GetDotProduct(pCaloHit3D->GetPositionVector() - centroid));
+    const CartesianVector axisIntercept(centroid + (axisDirection * minProjection));
+
+    // Now define ortho directions
+    const CartesianVector seedDirection((axisDirection.GetX() < std::min(axisDirection.GetY(), axisDirection.GetZ())) ? CartesianVector(1.f, 0.f, 0.f) :
+        (axisDirection.GetY() < std::min(axisDirection.GetX(), axisDirection.GetZ())) ? CartesianVector(0.f, 1.f, 0.f) : CartesianVector(0.f, 0.f, 1.f));
+
+    const CartesianVector orthoDirection1(seedDirection.GetCrossProduct(axisDirection).GetUnitVector());
+
+    const CartesianVector orthoDirection2(axisDirection.GetCrossProduct(orthoDirection1).GetUnitVector());
+   
+    //Estimate total cluster energy
+    float clusterEnergyInMeV(0);
+    for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D) clusterEnergyInMeV += pCaloHit3D->GetInputEnergy()*convertADCToMeV;
+
+    //Observed transverse profile
+    int transverseProfileNBins = 50;
+    float transverseProfileLow = moliereRadiusCmArgon*-1;
+    float transverseProfileHigh = moliereRadiusCmArgon;
+    float transverseProfileBinSize = (transverseProfileHigh-transverseProfileLow)/transverseProfileNBins;
+    TwoDHistogram observedTransverseProfile(transverseProfileNBins, transverseProfileLow, transverseProfileHigh, transverseProfileNBins, transverseProfileLow, transverseProfileHigh);
+
+    std::vector<float> caloHitProjectedPosition1Vect, caloHitProjectedPosition2Vect, caloHitEnergyVect;
+
+    for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D)
+    {
+        const CartesianVector hitCoordinate(pCaloHit3D->GetPositionVector() - centroid);
+        const float position1(hitCoordinate.GetDotProduct(orthoDirection1));
+        const float position2(hitCoordinate.GetDotProduct(orthoDirection2));
+        if (position1 < transverseProfileHigh && position1 > transverseProfileLow && position2 <transverseProfileHigh && position2 > transverseProfileLow){
+          observedTransverseProfile.Fill(position1, position2, pCaloHit3D->GetInputEnergy()*convertADCToMeV); // Units: MeV; note counting U, V and W parent hits here!
+          
+          //Also save hit projections into vectors
+          caloHitProjectedPosition1Vect.push_back(position1);
+          caloHitProjectedPosition2Vect.push_back(position2);
+         
+          // get energy vector for 2shower prediction
+	  caloHitEnergyVect.push_back(pCaloHit3D->GetInputEnergy()*convertADCToMeV);
+        }
+     }
+
+     //Scale observed profile to total cluster energy
+     observedTransverseProfile.Scale(clusterEnergyInMeV/observedTransverseProfile.GetCumulativeSum());
+
+     //A 1 cluster expected profile
+     TwoDHistogram expectedTransverseProfile_oneShower(transverseProfileNBins, transverseProfileLow, transverseProfileHigh, transverseProfileNBins, transverseProfileLow, transverseProfileHigh);
+     //Expected tranvserse profile (Grindhammer parametrisation)
+     for (int iBinX=0; iBinX<transverseProfileNBins; iBinX++) 
+     {
+         float profileX=transverseProfileLow+iBinX*transverseProfileBinSize;
+         for (int iBinY=0; iBinY<transverseProfileNBins; iBinY++)
+         {
+            float profileY=transverseProfileLow+iBinY*transverseProfileBinSize;
+            float profileRadius=std::sqrt(profileX*profileX+profileY*profileY);
+            float profileValue=GetLateralProfileAtShowerMaximum(clusterEnergyInMeV,profileRadius);
+            expectedTransverseProfile_oneShower.SetBinContent(iBinX, iBinY, profileValue);
+         }
+     }
+     expectedTransverseProfile_oneShower.Scale(clusterEnergyInMeV/expectedTransverseProfile_oneShower.GetCumulativeSum());
+    
+
+     if(m_visualDisplaysOn)
+     { 
+        std::cout << std::endl;
+        std::cout << "Observed Transverse Profile" << std::endl;
+        PandoraMonitoringApi::DrawPandoraHistogram(this->GetPandora(), observedTransverseProfile, "COLZ");
+
+        std::cout << "Expected 1 shower Transverse Profile" << std::endl;
+        PandoraMonitoringApi::DrawPandoraHistogram(this->GetPandora(), expectedTransverseProfile_oneShower, "COLZ");
+
+     }
+ 
+     //Calculate figure of merit for this cluster
+     float squaredDiffSumOne(0);
+     for (int iBinX=0; iBinX<transverseProfileNBins; iBinX++) 
+     {
+         for (int iBinY=0; iBinY<transverseProfileNBins; iBinY++)
+         {
+           float diffOne = expectedTransverseProfile_oneShower.GetBinContent(iBinX, iBinY)-observedTransverseProfile.GetBinContent(iBinX,iBinY);
+
+           float squaredDiffOne = diffOne*diffOne;     
+
+           squaredDiffSumOne+=squaredDiffOne;
+         }
+     }
+
+     float figureOfMeritOne = squaredDiffSumOne/clusterEnergyInMeV;   
+   
+     //std::cout << "Before Clustering: FoM One Shower = " << figureOfMeritOne << std::endl;
+ 
+     return figureOfMeritOne;
+}
+
 float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList mergedClusterCaloHitList3D)
 {
     std::cout << ">>>> I'm getting Transverse Profile FOM BEFORE RECLUSTERING" << std::endl;
@@ -1025,7 +1136,7 @@ float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList
    
     //Estimate total cluster energy
     float clusterEnergyInMeV(0);
-    //for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D) clusterEnergyInMeV += pCaloHit3D->GetInputEnergy()*convertADCToMeV;
+    for (const CaloHit *const pCaloHit3D : mergedClusterCaloHitList3D) clusterEnergyInMeV += pCaloHit3D->GetInputEnergy()*convertADCToMeV;
 
     //Observed transverse profile
     int transverseProfileNBins = 50;
@@ -1050,28 +1161,27 @@ float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList
          
           // get energy vector for 2shower prediction
 	  caloHitEnergyVect.push_back(pCaloHit3D->GetInputEnergy()*convertADCToMeV);
-	  clusterEnergyInMeV += pCaloHit3D->GetInputEnergy()*convertADCToMeV;
         }
      }
 
      //Scale observed profile to total cluster energy
      observedTransverseProfile.Scale(clusterEnergyInMeV/observedTransverseProfile.GetCumulativeSum());
 
-     //A 1 cluster expected profile
-     TwoDHistogram expectedTransverseProfile_oneShower(transverseProfileNBins, transverseProfileLow, transverseProfileHigh, transverseProfileNBins, transverseProfileLow, transverseProfileHigh);
-     //Expected tranvserse profile (Grindhammer parametrisation)
-     for (int iBinX=0; iBinX<transverseProfileNBins; iBinX++) 
-     {
-         float profileX=transverseProfileLow+iBinX*transverseProfileBinSize;
-         for (int iBinY=0; iBinY<transverseProfileNBins; iBinY++)
-         {
-            float profileY=transverseProfileLow+iBinY*transverseProfileBinSize;
-            float profileRadius=std::sqrt(profileX*profileX+profileY*profileY);
-            float profileValue=GetLateralProfileAtShowerMaximum(clusterEnergyInMeV,profileRadius);
-            expectedTransverseProfile_oneShower.SetBinContent(iBinX, iBinY, profileValue);
-         }
-     }
-     expectedTransverseProfile_oneShower.Scale(clusterEnergyInMeV/expectedTransverseProfile_oneShower.GetCumulativeSum());
+     ////A 1 cluster expected profile
+     //TwoDHistogram expectedTransverseProfile_oneShower(transverseProfileNBins, transverseProfileLow, transverseProfileHigh, transverseProfileNBins, transverseProfileLow, transverseProfileHigh);
+     ////Expected tranvserse profile (Grindhammer parametrisation)
+     //for (int iBinX=0; iBinX<transverseProfileNBins; iBinX++) 
+     //{
+     //    float profileX=transverseProfileLow+iBinX*transverseProfileBinSize;
+     //    for (int iBinY=0; iBinY<transverseProfileNBins; iBinY++)
+     //    {
+     //       float profileY=transverseProfileLow+iBinY*transverseProfileBinSize;
+     //       float profileRadius=std::sqrt(profileX*profileX+profileY*profileY);
+     //       float profileValue=GetLateralProfileAtShowerMaximum(clusterEnergyInMeV,profileRadius);
+     //       expectedTransverseProfile_oneShower.SetBinContent(iBinX, iBinY, profileValue);
+     //    }
+     //}
+     //expectedTransverseProfile_oneShower.Scale(clusterEnergyInMeV/expectedTransverseProfile_oneShower.GetCumulativeSum());
     
      //------------------- Andy Chappel Implementation -------------//
      //Canvas canvas( transverseProfileNBins, transverseProfileNBins, transverseProfileLow, transverseProfileHigh, transverseProfileLow, transverseProfileHigh); 
@@ -1188,8 +1298,8 @@ float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList
         std::cout << "Observed Transverse Profile" << std::endl;
         PandoraMonitoringApi::DrawPandoraHistogram(this->GetPandora(), observedTransverseProfile, "COLZ");
 
-        std::cout << "Expected 1 shower Transverse Profile" << std::endl;
-        PandoraMonitoringApi::DrawPandoraHistogram(this->GetPandora(), expectedTransverseProfile_oneShower, "COLZ");
+        //std::cout << "Expected 1 shower Transverse Profile" << std::endl;
+        //PandoraMonitoringApi::DrawPandoraHistogram(this->GetPandora(), expectedTransverseProfile_oneShower, "COLZ");
 
         std::cout << "kMeans 2 centers" << std::endl;
         PandoraMonitoringApi::DrawPandoraHistogram(this->GetPandora(), observedTransverseProfileCenters, "COLZ");
@@ -1209,33 +1319,33 @@ float ThreeDReclusteringAlgorithm::GetTransverseProfileFigureOfMerit(CaloHitList
      }
  
      //Calculate figure of merit for this cluster
-     float squaredDiffSumOne(0);
+     //float squaredDiffSumOne(0);
      float squaredDiffSumTwo(0);
      //float squaredDiffSumTwoPeak(0);
      for (int iBinX=0; iBinX<transverseProfileNBins; iBinX++) 
      {
          for (int iBinY=0; iBinY<transverseProfileNBins; iBinY++)
          {
-           float diffOne = expectedTransverseProfile_oneShower.GetBinContent(iBinX, iBinY)-observedTransverseProfile.GetBinContent(iBinX,iBinY);
+           //float diffOne = expectedTransverseProfile_oneShower.GetBinContent(iBinX, iBinY)-observedTransverseProfile.GetBinContent(iBinX,iBinY);
            float diffTwo = expectedTransverseProfile_twoShowers.GetBinContent(iBinX, iBinY)-observedTransverseProfile.GetBinContent(iBinX,iBinY);
            //float diffTwoPeak = peakFinderExpectedTransverseProfile_twoShowers.GetBinContent(iBinX, iBinY)-observedTransverseProfile.GetBinContent(iBinX,iBinY);
 
-           float squaredDiffOne = diffOne*diffOne;     
+           //float squaredDiffOne = diffOne*diffOne;     
            float squaredDiffTwo = diffTwo*diffTwo;     
            //float squaredDiffTwoPeak = diffTwoPeak*diffTwoPeak;     
 
-           squaredDiffSumOne+=squaredDiffOne;
+           //squaredDiffSumOne+=squaredDiffOne;
            squaredDiffSumTwo+=squaredDiffTwo;
            //squaredDiffSumTwoPeak+=squaredDiffTwoPeak;
          }
      }
 
-     float figureOfMeritOne = squaredDiffSumOne/clusterEnergyInMeV;   
+     //float figureOfMeritOne = squaredDiffSumOne/clusterEnergyInMeV;   
      float figureOfMeritTwo = squaredDiffSumTwo/clusterEnergyInMeV;   
      //float figureOfMeritTwoPeak = squaredDiffSumTwoPeak/clusterEnergyInMeV;   
    
-     std::cout << "Before Clustering: FoM One Shower = " << figureOfMeritOne << std::endl;
-     std::cout << "Before Clustering: FoM Two Shower = " << figureOfMeritTwo << std::endl;
+     //std::cout << "Before Clustering: FoM One Shower = " << figureOfMeritOne << std::endl;
+     //std::cout << "Before Clustering: FoM Two Shower = " << figureOfMeritTwo << std::endl;
      //std::cout << "Before Clustering: FoM Two Shower Peak Finder = " << figureOfMeritTwoPeak << std::endl;
  
      return figureOfMeritTwo;

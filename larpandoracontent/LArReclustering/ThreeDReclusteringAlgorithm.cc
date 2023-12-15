@@ -313,37 +313,37 @@ StatusCode ThreeDReclusteringAlgorithm::RebuildPfo(const Pfo *pPfoToRebuild, Clu
            PandoraMonitoringApi::VisualizeCaloHits(this->GetPandora(),&leftoverCaloHitsToVisualise, "leftoverCaloHits", AUTOITER);
            PandoraMonitoringApi::ViewEvent(this->GetPandora());
        }*/
-       //std::cout << "debug leftover hits 0" << std::endl;
-       if(clustersForLeftoverHitsMap.size())  //THE QUESTION REMAINS OF WHAT TO DO WITH LEFTOVER HITS IF TEHRE IS NO CLUSTER TO ATTACH THEM TO (THIS CONDITION FAILS)!!!
-       {
-       for(const OrderedCaloHitList::value_type &mapEntry : leftoverCaloHitList)
-           {
-               for (const CaloHit *const pCaloHit : *mapEntry.second)
-               {
-                   //std::cout << "New leftover 2D hit; now finding nearest cluster..." << std::endl;
-                   const Cluster* pNearestCluster = nullptr;
-                   double minimumDistance(std::numeric_limits<float>::max());
-                   //std::cout << "debug" << std::endl;
-                   //std::cout << "pCaloHitPosition = " << pCaloHit->GetPositionVector().GetX() << " " << pCaloHit->GetPositionVector().GetY() << " " << pCaloHit->GetPositionVector().GetZ() << std::endl;
-                   //std::cout << "clustersForLeftoverHitsMap size = " << clustersForLeftoverHitsMap.size() << std::endl;
-                   for(const auto & [clusterIndex, pNewTwoDCluster] : clustersForLeftoverHitsMap)
-                   {
-                       //std::cout << "clusterIndex = " << clusterIndex << std::endl;
-                       //std::cout << "pNewTwoDCluster = " << pNewTwoDCluster << std::endl;
-                       double dist = LArClusterHelper::GetClosestDistance(pCaloHit->GetPositionVector(), pNewTwoDCluster);  
-                       //std::cout << "distance = " << dist << std::endl;
-                       if (dist<minimumDistance)
-                       {
-                           minimumDistance=dist;
-                           pNearestCluster=pNewTwoDCluster;
-                       }
-                   }
-                   //std::cout << "DEBUG minimumDistance = " << minimumDistance << " pNearestCluster = " << pNearestCluster << " is available? " << pNearestCluster->IsAvailable() << " pCaloHit = " << pCaloHit <<  std::endl;
-                   PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::AddToCluster(*this,pNearestCluster,pCaloHit));
-                   //std::cout << "The nearest cluster has distance = " << minimumDistance << std::endl; 
-               }
-           }
-       }
+       std::cout << "debug leftover hits 0" << std::endl;
+//       if(clustersForLeftoverHitsMap.size())  //THE QUESTION REMAINS OF WHAT TO DO WITH LEFTOVER HITS IF TEHRE IS NO CLUSTER TO ATTACH THEM TO (THIS CONDITION FAILS)!!!
+//       {
+//       for(const OrderedCaloHitList::value_type &mapEntry : leftoverCaloHitList)
+//           {
+//               for (const CaloHit *const pCaloHit : *mapEntry.second)
+//               {
+//                   //std::cout << "New leftover 2D hit; now finding nearest cluster..." << std::endl;
+//                   const Cluster* pNearestCluster = nullptr;
+//                   double minimumDistance(std::numeric_limits<float>::max());
+//                   //std::cout << "debug" << std::endl;
+//                   //std::cout << "pCaloHitPosition = " << pCaloHit->GetPositionVector().GetX() << " " << pCaloHit->GetPositionVector().GetY() << " " << pCaloHit->GetPositionVector().GetZ() << std::endl;
+//                   //std::cout << "clustersForLeftoverHitsMap size = " << clustersForLeftoverHitsMap.size() << std::endl;
+//                   for(const auto & [clusterIndex, pNewTwoDCluster] : clustersForLeftoverHitsMap)
+//                   {
+//                       //std::cout << "clusterIndex = " << clusterIndex << std::endl;
+//                       //std::cout << "pNewTwoDCluster = " << pNewTwoDCluster << std::endl;
+//                       double dist = LArClusterHelper::GetClosestDistance(pCaloHit->GetPositionVector(), pNewTwoDCluster);  
+//                       //std::cout << "distance = " << dist << std::endl;
+//                       if (dist<minimumDistance)
+//                       {
+//                           minimumDistance=dist;
+//                           pNearestCluster=pNewTwoDCluster;
+//                       }
+//                   }
+//                   //std::cout << "DEBUG minimumDistance = " << minimumDistance << " pNearestCluster = " << pNearestCluster << " is available? " << pNearestCluster->IsAvailable() << " pCaloHit = " << pCaloHit <<  std::endl;
+//                   PANDORA_THROW_RESULT_IF(STATUS_CODE_SUCCESS, !=, PandoraContentApi::AddToCluster(*this,pNearestCluster,pCaloHit));
+//                   //std::cout << "The nearest cluster has distance = " << minimumDistance << std::endl; 
+//               }
+//           }
+//       }
        //std::cout << "debug leftover hits 1" << std::endl;
 
        //Visualise 2D clusters after having added in the leftover hits
